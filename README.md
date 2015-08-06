@@ -1,2 +1,0 @@
-# XMLSocket
-C# Class
