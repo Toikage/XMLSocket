@@ -7,9 +7,7 @@ namespace AS
 {
 	public class XMLSocket : IDisposable
 	{
-		private object socketLocker = new object();
 		private Socket socket = null;
-		private byte[] receiveBuffer = new byte[256];
 
 		public XMLSocket()
 		{
@@ -35,32 +33,24 @@ namespace AS
 		/// </summary>
 		public void Disconnect()
 		{
-			lock (socketLocker)
+			if(socket != null)
 			{
-				if(socket != null)
-				{
-					socket.Shutdown(SocketShutdown.Both);
-					socket.Dispose();
-					socket = null;
-				}
-				else
-					throw new InvalidOperationException();
+				socket.Shutdown(SocketShutdown.Both);
+				socket.Dispose();
+				socket = null;
 			}
+			else
+				throw new InvalidOperationException();
 		}
 
 		private void Arg_ConnectCompleted(object sender, SocketAsyncEventArgs e)
 		{
-			lock (socketLocker)
-			{
-				if(socket == null)
-				{
-					socket = e.ConnectSocket;
-					if(e.UserToken != null)
-						(e.UserToken as EventHandler)(this, EventArgs.Empty);
-                }
-				else
-					throw new InvalidOperationException();
-			}
+			if(socket == null)
+				socket = e.ConnectSocket;
+			else
+				throw new InvalidOperationException();
+			if(e.UserToken != null)
+				(e.UserToken as EventHandler)(this, EventArgs.Empty);
 		}
 
 		/// <summary>
@@ -71,24 +61,19 @@ namespace AS
 		/// <param name="xml"></param>
 		public void Send(string xml, EventHandler onSent, EventHandler onFailed)
 		{
-			lock (socketLocker)
+			var arg = new SocketAsyncEventArgs();
+			var data = Encoding.ASCII.GetBytes(xml + "\0");
+			arg.SetBuffer(data, 0, data.Length);
+			arg.UserToken = new Arg_SendUserToken() { onSent = onSent, onFailed = onFailed };
+			arg.Completed += Arg_SendCompleted;
+			if(socket != null)
 			{
-				if(socket != null)
-				{
-					var arg = new SocketAsyncEventArgs();
-					var data = Encoding.ASCII.GetBytes(xml + "\0");
-					arg.SetBuffer(data, 0, data.Length);
-					arg.UserToken = new Arg_SendUserToken() { onSent = onSent, onFailed = onFailed };
-					arg.Completed += Arg_SendCompleted;
-
-					if(socket.SendAsync(arg) == false)
-						if(onFailed != null)
-							onFailed(this, EventArgs.Empty);
-				}
-				else
-					throw new InvalidOperationException();
+				if(socket.SendAsync(arg) == false)
+					if(onFailed != null)
+						onFailed(this, EventArgs.Empty);
 			}
-
+			else
+				throw new InvalidOperationException();
 		}
 
 		private void Arg_SendCompleted(object sender, SocketAsyncEventArgs e)
@@ -117,19 +102,15 @@ namespace AS
 
 		private void Receive_Loop(Arg_ReceiveUserToken ut)
 		{
-			lock (socketLocker)
+			var arg = new SocketAsyncEventArgs() { UserToken = ut };
+			arg.SetBuffer(new byte[256], 0, 256);
+			arg.Completed += Arg_ReceiveCompleted;
+			if(socket != null)
 			{
-				if(socket != null)
-				{
-					var arg = new SocketAsyncEventArgs() { UserToken = ut };
-					arg.SetBuffer(receiveBuffer, 0, 256);
-					arg.Completed += Arg_ReceiveCompleted;
-					if(socket.ReceiveAsync(arg) == false)
-						if(ut.onFailed != null)
-							ut.onFailed(this, EventArgs.Empty);
-				}//else
-			}
-
+				if(socket.ReceiveAsync(arg) == false)
+					if(ut.onFailed != null)
+						ut.onFailed(this, EventArgs.Empty);
+			}//else
 		}
 
 		private void Arg_ReceiveCompleted(object sender, SocketAsyncEventArgs e)
